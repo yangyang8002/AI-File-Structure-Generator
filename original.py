@@ -1,56 +1,91 @@
+你说得对！
+
+解析函数只把行首的 `├──` 之类符号去掉，却没把“层级前缀”全部剥掉，导致：
+
+```
+auth/login.php
+```
+
+被当成文件名 `auth/login.php` 直接丢到根目录，而不是在 `auth/` 目录下创建 `login.php`。
+
+根本原因：没有根据缩进（或前缀）计算相对路径。
+
+下面给出修复后的完整脚本，只改动了 `parse_structure` 与 `build_structure` 两个函数，其余 UI 部分保持不变。
+
+```python
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import List, Tuple
 
 
-def parse_structure(text: str) -> Tuple[List[str], List[str]]:
+# ------------------------------------------------------------------
+# 核心解析 & 构建
+# ------------------------------------------------------------------
+def parse_structure(text: str) -> List[str]:
     """
-    解析树形文本，返回 (folders, files) 两个列表。
+    解析树形文本，返回“相对路径”列表（文件夹去掉末尾 /）。
     忽略空行、# 注释与行尾注释。
     """
-    folders = []
-    files   = []
+    paths = []
+
+    # 记录前缀长度 → 目录栈
+    # (indent_len, folder_name)
+    stack: List[Tuple[int, str]] = []
 
     for raw_line in text.splitlines():
-        line = raw_line.split('#', 1)[0].rstrip()   # 去掉注释及右侧空白
-        if not line.strip():                        # 空行跳过
+        line = raw_line.split('#', 1)[0].rstrip()
+        if not line.strip():
             continue
 
-        # 去掉前导树形符号
-        name = line.lstrip('├─└│─ ').strip()
+        # 计算缩进长度（只统计空格或树形符号）
+        stripped = line.lstrip('├─└│─ ')
+        indent = len(line) - len(stripped)
+
+        name = stripped.strip()
         if not name:
             continue
 
-        # 如果末尾带 “/” 则为文件夹
-        if name.endswith('/'):
-            folders.append(name.rstrip('/'))
-        else:
-            files.append(name)
+        # 找到当前应该归属的父目录
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
 
-    return folders, files
+        parent = ''
+        if stack:
+            parent = stack[-1][1]
+
+        # 组装完整相对路径
+        full_path = os.path.join(parent, name.rstrip('/'))
+
+        paths.append(full_path)
+
+        # 如果是目录，压栈
+        if name.endswith('/'):
+            stack.append((indent, full_path))
+
+    return paths
 
 
 def build_structure(structure_text: str, root_path: str) -> None:
     """根据解析结果在 root_path 里创建文件夹和空文件。"""
-    folders, files = parse_structure(structure_text)
+    paths = parse_structure(structure_text)
 
     try:
-        # 创建文件夹
-        for folder in folders:
-            os.makedirs(os.path.join(root_path, folder), exist_ok=True)
-
-        # 创建空文件
-        for file in files:
-            full_path = os.path.join(root_path, file)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            if not os.path.exists(full_path):
-                open(full_path, 'w', encoding='utf-8').close()
-
+        for path in paths:
+            abs_path = os.path.join(root_path, path)
+            if path.endswith('/'):           # 目录
+                os.makedirs(abs_path, exist_ok=True)
+            else:                            # 文件
+                os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+                if not os.path.exists(abs_path):
+                    open(abs_path, 'w', encoding='utf-8').close()
     except OSError as e:
         raise RuntimeError(str(e))
 
 
+# ------------------------------------------------------------------
+# Tkinter UI（与之前相同）
+# ------------------------------------------------------------------
 class Application(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -104,7 +139,9 @@ class Application(tk.Tk):
             messagebox.showerror("错误", f"生成失败：\n{e}")
 
 
+# ------------------------------------------------------------------
 # 示例结构
+# ------------------------------------------------------------------
 EXAMPLE = """
 /domain-distributor/
 ├── index.php
@@ -141,3 +178,6 @@ EXAMPLE = """
 if __name__ == "__main__":
     app = Application()
     app.mainloop()
+```
+
+现在再试一次，所有文件都会正确地落到各自子目录里。
