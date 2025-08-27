@@ -1,18 +1,3 @@
-你说得对！
-
-解析函数只把行首的 `├──` 之类符号去掉，却没把“层级前缀”全部剥掉，导致：
-
-```
-auth/login.php
-```
-
-被当成文件名 `auth/login.php` 直接丢到根目录，而不是在 `auth/` 目录下创建 `login.php`。
-
-根本原因：没有根据缩进（或前缀）计算相对路径。
-
-下面给出修复后的完整脚本，只改动了 `parse_structure` 与 `build_structure` 两个函数，其余 UI 部分保持不变。
-
-```python
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -178,6 +163,3 @@ EXAMPLE = """
 if __name__ == "__main__":
     app = Application()
     app.mainloop()
-```
-
-现在再试一次，所有文件都会正确地落到各自子目录里。
